@@ -1,55 +1,77 @@
 #r "Newtonsoft.Json"
 
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
+using System;
+using System.IO;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Primitives;
+using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.WebJobs.Extensions.Http;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using System.Net.Http;
+using System.Web;
+using System.Net.Http.Headers;
 using System.Collections.Generic;
 using Newtonsoft.Json;
-using System.Text;
-using System.IO;
 
 public static async Task<IActionResult> Run(HttpRequest req, ILogger log)
     {
         try
-        {
-        using(HttpClient httpClient = new HttpClient()) {
-        string appKey = req.Query["appkey"];
-        string redirect_uri = req.Query["redirect_uri"];
-        string tokenurl = req.Query["tokenurl"];
-        string code = req.Query["code"];
-        string client_id = req.Query["client_id"];
-        string client_secret = req.Query["client_secret"];
-        string grant_type = req.Query["grant_type"];
-        httpClient.DefaultRequestHeaders.Add("AppKey", appKey);
-        
-        httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/x-www-form-urlencoded"));
-        var queryString = req.QueryString.Value;
-        var bodyData = new[] {
-            new KeyValuePair<string, string>("redirect_uri", redirect_uri),
-            new KeyValuePair<string, string>("grant_type", grant_type),
-            new KeyValuePair<string, string>("code", code),
-            new KeyValuePair<string, string>("client_id", client_id),
-            new KeyValuePair<string, string>("client_secret", client_secret)
-        };
-        var requestData = new FormUrlEncodedContent(bodyData);
-        var url = tokenurl + queryString;
-        var response  = await httpClient.PostAsync(url, requestData);
-        var result = await response.Content.ReadAsStringAsync();
-        if(response.IsSuccessStatusCode){
-            //throw new Exception(result);
-            return new JsonResult(JsonConvert.DeserializeObject(result));
-        }
-        else{
-            return new BadRequestObjectResult(result);
-        }
-        }
-        }
-        catch(Exception ex){
-            return new BadRequestObjectResult(ex.Message);
-            throw ex;
-        }
+            {
+                log.LogInformation("C# HTTP trigger function processed a request.");
 
-    return new BadRequestObjectResult("Authorization Request Failed");
+                Dictionary<string, string> bodyData = new Dictionary<string, string>();
+                string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+
+                if (!string.IsNullOrEmpty(requestBody))
+                {
+                    string[] requestBodyParams = requestBody.Trim('\"').Split('&');
+                    string appKey = string.Empty;
+                    string stringurl = string.Empty;
+
+                    foreach (string requestBodyParam in requestBodyParams)
+                    {
+                        string[] properties = requestBodyParam.Split('=');
+                        if (!string.IsNullOrEmpty(properties[0]) && !string.IsNullOrEmpty(properties[1]))
+                        {
+                            bodyData.Add(HttpUtility.UrlDecode(properties[0]), HttpUtility.UrlDecode(properties[1]));
+                            if (properties[0].Trim().ToLowerInvariant() == "appkey")
+                            {
+                                appKey = HttpUtility.UrlDecode(properties[1]);
+                            }
+                            else if (properties[0].Trim().ToLowerInvariant() == "tokenurl")
+                            {
+                                stringurl = HttpUtility.UrlDecode(properties[1]);
+                            }
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(stringurl) && !string.IsNullOrEmpty(appKey))
+                    {
+                        using (HttpClient httpClient = new HttpClient())
+                        {
+                            httpClient.DefaultRequestHeaders.Add("AppKey", appKey);
+                            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/x-www-form-urlencoded"));
+                            var requestData = new FormUrlEncodedContent(bodyData);
+                            var response = await httpClient.PostAsync(stringurl, requestData);
+                            var result = await response.Content.ReadAsStringAsync();
+                            if (response.IsSuccessStatusCode)
+                            {
+                                return new JsonResult(JsonConvert.DeserializeObject(result));
+                            }
+                            else
+                            {
+                                return new BadRequestObjectResult(result);
+                            }
+                        }
+                    }
+                    return new BadRequestObjectResult("Token Url / App Key not present.");
+                }
+
+                return new BadRequestObjectResult("Request Body is not present.");
+            }
+            catch (Exception ex)
+            {
+                return new BadRequestObjectResult(ex.Message);
+            }
 }
